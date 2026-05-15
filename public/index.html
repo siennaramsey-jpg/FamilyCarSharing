@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#16423c" />
+    <title>Family Car Share</title>
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="topbar" aria-label="App header">
+        <div>
+          <p class="eyebrow">Family car</p>
+          <h1>Book the car</h1>
+        </div>
+        <div class="status-pill" id="telegramStatus">Checking Telegram</div>
+      </section>
+
+      <section class="layout">
+        <section class="panel calendar-panel" aria-label="Booking calendar">
+          <div class="panel-heading">
+            <button class="icon-button" id="prevMonth" aria-label="Previous month">‹</button>
+            <h2 id="monthLabel">Month</h2>
+            <button class="icon-button" id="nextMonth" aria-label="Next month">›</button>
+          </div>
+          <div class="weekdays" aria-hidden="true">
+            <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+          </div>
+          <div class="calendar" id="calendar"></div>
+        </section>
+
+        <section class="panel form-panel" aria-label="Create booking">
+          <div class="panel-title">
+            <h2>New request</h2>
+            <span id="selectedDateText">Pick a day</span>
+          </div>
+
+          <form id="bookingForm" class="form-grid">
+            <label>
+              Driver
+              <select name="driver" required>
+                <option value="Sienna">Sienna</option>
+                <option value="Elliot">Elliot</option>
+              </select>
+            </label>
+            <label>
+              Date
+              <input type="date" name="date" required />
+            </label>
+            <label>
+              Start
+              <input type="time" name="startTime" required />
+            </label>
+            <label>
+              End
+              <input type="time" name="endTime" required />
+            </label>
+            <label class="wide">
+              Destination
+              <input type="text" name="destination" placeholder="Start typing an address" autocomplete="off" />
+              <input type="hidden" name="destinationId" />
+              <div class="suggestions" id="addressSuggestions" hidden></div>
+            </label>
+            <div class="estimate wide" id="tripEstimate" hidden>
+              <span>Round trip from home</span>
+              <strong>Choose a destination</strong>
+            </div>
+            <label class="wide">
+              Note
+              <textarea name="note" rows="3" placeholder="Anything your parents should know?"></textarea>
+            </label>
+            <button class="primary wide" type="submit">Send booking request</button>
+          </form>
+          <p class="message" id="bookingMessage"></p>
+        </section>
+      </section>
+
+      <section class="lower-grid">
+        <section class="panel bookings-panel" aria-label="Bookings">
+          <div class="panel-title">
+            <h2>Bookings</h2>
+            <button class="text-button" id="refreshBookings">Refresh</button>
+          </div>
+          <div class="booking-list" id="bookingList"></div>
+        </section>
+
+        <section class="panel cost-panel" aria-label="Kilometer calculator">
+          <div class="panel-title">
+            <h2>Km cost</h2>
+            <span id="rateHint"></span>
+          </div>
+          <form id="costForm" class="form-grid">
+            <label>
+              Start km
+              <input type="number" name="startKm" min="0" step="0.1" inputmode="decimal" required />
+            </label>
+            <label>
+              End km
+              <input type="number" name="endKm" min="0" step="0.1" inputmode="decimal" required />
+            </label>
+            <label class="wide">
+              Price per km, DKK
+              <input type="number" name="rate" min="0" step="0.01" inputmode="decimal" required />
+            </label>
+            <button class="secondary wide" type="submit">Calculate trip</button>
+          </form>
+          <div class="cost-result" id="costResult">
+            <strong>0 km</strong>
+            <span>0.00 DKK</span>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>

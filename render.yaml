@@ -1,0 +1,22 @@
+﻿services:
+  - type: web
+    name: family-car-share
+    env: node
+    plan: free
+    buildCommand: ""
+    startCommand: npm start
+    envVars:
+      - key: PUBLIC_BASE_URL
+        value: ""
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_PARENT_CHAT_IDS
+        sync: false
+      - key: APPROVAL_SECRET
+        generateValue: true
+      - key: DEFAULT_KM_RATE
+        value: "1.5"
+      - key: HOME_ADDRESS
+        value: "Havesvinget 14, 2950 Vedbaek"
+      - key: SEARCH_RADIUS_KM
+        value: "85"
