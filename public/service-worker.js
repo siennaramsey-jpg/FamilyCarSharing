@@ -1,4 +1,4 @@
-const CACHE_NAME = "family-car-share-v2";
+﻿const CACHE_NAME = "family-car-sharing-v3";
 const ASSETS = ["/", "/index.html", "/styles.css", "/app.js", "/manifest.json", "/icon.svg"];
 
 self.addEventListener("install", (event) => {

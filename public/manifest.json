@@ -1,6 +1,6 @@
-{
-  "name": "Family Car Share",
-  "short_name": "Car Share",
+﻿{
+  "name": "FamilyCarSharing",
+  "short_name": "FamilyCar",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#f4f0e8",
