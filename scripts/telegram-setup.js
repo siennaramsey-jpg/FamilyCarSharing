@@ -26,6 +26,7 @@ function writeEnv(values) {
     "PUBLIC_BASE_URL",
     "TELEGRAM_BOT_TOKEN",
     "TELEGRAM_PARENT_CHAT_IDS",
+    "TELEGRAM_NOTIFY_CHAT_IDS",
     "APPROVAL_SECRET",
     "DEFAULT_KM_RATE",
     "HOME_ADDRESS",
@@ -55,6 +56,7 @@ async function main() {
     PUBLIC_BASE_URL: "http://localhost:3000",
     TELEGRAM_BOT_TOKEN: "",
     TELEGRAM_PARENT_CHAT_IDS: "",
+    TELEGRAM_NOTIFY_CHAT_IDS: "",
     APPROVAL_SECRET: crypto.randomBytes(24).toString("hex"),
     DEFAULT_KM_RATE: "1.5",
     HOME_ADDRESS: "Havesvinget 14, 2950 Vedbæk",
@@ -81,7 +83,8 @@ async function main() {
 
   const bot = await telegram("getMe", env.TELEGRAM_BOT_TOKEN);
   console.log(`Connected to bot: @${bot.username}`);
-  console.log("Ask your dad to open that bot in Telegram and send: /start");
+  const notifyMode = args.includes("--notify");
+  console.log(`Ask ${notifyMode ? "your account" : "your dad"} to open that bot in Telegram and send: /start`);
 
   const updates = await telegram("getUpdates", env.TELEGRAM_BOT_TOKEN);
   const chats = new Map();
@@ -93,19 +96,25 @@ async function main() {
   }
 
   if (chats.size === 0) {
-    console.log("No chats found yet. Wait until your dad sends /start, then run:");
-    console.log("node scripts/telegram-setup.js");
+    console.log(`No chats found yet. Wait until ${notifyMode ? "you send" : "your dad sends"} /start, then run:`);
+    console.log(`node scripts/telegram-setup.js${notifyMode ? " --notify" : ""}`);
     return;
   }
 
   const [chatId, name] = [...chats.entries()][chats.size - 1];
-  env.TELEGRAM_PARENT_CHAT_IDS = chatId;
+  if (notifyMode) {
+    env.TELEGRAM_NOTIFY_CHAT_IDS = chatId;
+  } else {
+    env.TELEGRAM_PARENT_CHAT_IDS = chatId;
+  }
   writeEnv(env);
-  console.log(`Saved dad's chat ID to .env: ${chatId}${name ? ` (${name})` : ""}`);
+  console.log(`Saved ${notifyMode ? "notification" : "dad's"} chat ID to .env: ${chatId}${name ? ` (${name})` : ""}`);
 
   await telegram("sendMessage", env.TELEGRAM_BOT_TOKEN, {
     chat_id: chatId,
-    text: "Car sharing app is connected. Booking requests will arrive here."
+    text: notifyMode
+      ? "FamilyCarSharing will send you approval and denial messages here."
+      : "Car sharing app is connected. Booking requests will arrive here."
   });
   console.log("Sent a test message to Telegram.");
 }
