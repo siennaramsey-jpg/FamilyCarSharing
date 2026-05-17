@@ -20,3 +20,5 @@
         value: "Havesvinget 14, 2950 Vedbaek"
       - key: SEARCH_RADIUS_KM
         value: "85"
+      - key: DATABASE_URL
+        sync: false

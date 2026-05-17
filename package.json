@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "description": "Family car sharing booking app with Telegram approval and kilometer cost tracking.",
+  "dependencies": {
+    "pg": "^8.13.1"
+  },
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",

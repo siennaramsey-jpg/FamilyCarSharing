@@ -25,7 +25,9 @@ const DEFAULT_KM_RATE = Number(process.env.DEFAULT_KM_RATE || 1.5);
 const HOME_ADDRESS = process.env.HOME_ADDRESS || "Havesvinget 14, 2950 Vedbaek";
 const COPENHAGEN_CENTER = { lat: 55.6761, lon: 12.5683 };
 const SEARCH_RADIUS_KM = Number(process.env.SEARCH_RADIUS_KM || 85);
+const DATABASE_URL = process.env.DATABASE_URL || "";
 let cachedHomeCoordinates = null;
+let databasePool = null;
 
 const contentTypes = {
   ".html": "text/html; charset=utf-8",
@@ -60,12 +62,54 @@ function ensureDataFile() {
   }
 }
 
-function readStore() {
+async function initStore() {
+  if (!DATABASE_URL) {
+    ensureDataFile();
+    return;
+  }
+
+  const { Pool } = require("pg");
+  databasePool = new Pool({
+    connectionString: DATABASE_URL,
+    ssl: DATABASE_URL.includes("localhost") ? false : { rejectUnauthorized: false }
+  });
+
+  await databasePool.query(`
+    CREATE TABLE IF NOT EXISTS app_store (
+      id text PRIMARY KEY,
+      data jsonb NOT NULL,
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )
+  `);
+
+  await databasePool.query(
+    `INSERT INTO app_store (id, data)
+     VALUES ('bookings', '{"bookings":[]}'::jsonb)
+     ON CONFLICT (id) DO NOTHING`
+  );
+}
+
+async function readStore() {
+  if (databasePool) {
+    const result = await databasePool.query("SELECT data FROM app_store WHERE id = 'bookings'");
+    return result.rows[0]?.data || { bookings: [] };
+  }
+
   ensureDataFile();
   return JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
 }
 
-function writeStore(store) {
+async function writeStore(store) {
+  if (databasePool) {
+    await databasePool.query(
+      `INSERT INTO app_store (id, data, updated_at)
+       VALUES ('bookings', $1::jsonb, now())
+       ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
+      [JSON.stringify(store)]
+    );
+    return;
+  }
+
   fs.writeFileSync(DATA_FILE, JSON.stringify(store, null, 2));
 }
 
@@ -432,18 +476,18 @@ async function estimateRoundTrip(input) {
   };
 }
 
-function markBooking(id, decision) {
-  const store = readStore();
+async function markBooking(id, decision) {
+  const store = await readStore();
   const booking = store.bookings.find((item) => item.id === id);
   if (!booking) return null;
   booking.status = decision;
   booking.updatedAt = new Date().toISOString();
-  writeStore(store);
+  await writeStore(store);
   return booking;
 }
 
-function cancelBooking(id) {
-  const store = readStore();
+async function cancelBooking(id) {
+  const store = await readStore();
   const booking = store.bookings.find((item) => item.id === id);
   if (!booking) return null;
   if (booking.status === "cancelled") return booking;
@@ -453,7 +497,7 @@ function cancelBooking(id) {
   booking.status = "cancelled";
   booking.cancelledAt = new Date().toISOString();
   booking.updatedAt = booking.cancelledAt;
-  writeStore(store);
+  await writeStore(store);
   return booking;
 }
 
@@ -530,13 +574,13 @@ function parseRawBody(req) {
   });
 }
 
-function setBookingStatus(id, status) {
-  const store = readStore();
+async function setBookingStatus(id, status) {
+  const store = await readStore();
   const booking = store.bookings.find((item) => item.id === id);
   if (!booking) return null;
   booking.status = status;
   booking.updatedAt = new Date().toISOString();
-  writeStore(store);
+  await writeStore(store);
   return booking;
 }
 
@@ -587,7 +631,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && url.pathname === "/api/bookings") {
-      const store = readStore();
+      const store = await readStore();
       const bookings = store.bookings.sort((a, b) => new Date(a.startAt) - new Date(b.startAt));
       return sendJson(res, 200, { bookings });
     }
@@ -595,9 +639,9 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === "/api/bookings") {
       const input = await parseBody(req);
       const booking = normalizeBooking(input);
-      const store = readStore();
+      const store = await readStore();
       store.bookings.push(booking);
-      writeStore(store);
+      await writeStore(store);
 
       try {
         booking.telegram = await sendTelegramBooking(booking);
@@ -605,17 +649,17 @@ const server = http.createServer(async (req, res) => {
         booking.telegram = { sent: false, reason: error.message };
       }
 
-      const updatedStore = readStore();
+      const updatedStore = await readStore();
       const storedBooking = updatedStore.bookings.find((item) => item.id === booking.id);
       if (storedBooking) storedBooking.telegram = booking.telegram;
-      writeStore(updatedStore);
+      await writeStore(updatedStore);
 
       return sendJson(res, 201, { booking });
     }
 
     if (req.method === "POST" && url.pathname.startsWith("/api/bookings/") && url.pathname.endsWith("/cancel")) {
       const id = decodeURIComponent(url.pathname.replace("/api/bookings/", "").replace("/cancel", ""));
-      const booking = cancelBooking(id);
+      const booking = await cancelBooking(id);
       if (!booking) return sendJson(res, 404, { error: "Booking not found" });
 
       try {
@@ -624,10 +668,10 @@ const server = http.createServer(async (req, res) => {
         booking.cancellationTelegram = { sent: false, reason: error.message };
       }
 
-      const store = readStore();
+      const store = await readStore();
       const storedBooking = store.bookings.find((item) => item.id === booking.id);
       if (storedBooking) storedBooking.cancellationTelegram = booking.cancellationTelegram;
-      writeStore(store);
+      await writeStore(store);
 
       return sendJson(res, 200, { booking });
     }
@@ -652,7 +696,7 @@ const server = http.createServer(async (req, res) => {
         return res.end("<h1>Invalid approval link</h1>");
       }
 
-      const store = readStore();
+      const store = await readStore();
       const booking = store.bookings.find((item) => item.id === id);
       if (!booking) {
         res.writeHead(404, { "Content-Type": "text/html; charset=utf-8" });
@@ -675,7 +719,7 @@ const server = http.createServer(async (req, res) => {
         return res.end("<h1>Invalid approval request</h1>");
       }
 
-      const booking = markBooking(id, decision);
+      const booking = await markBooking(id, decision);
       if (!booking) {
         res.writeHead(404, { "Content-Type": "text/html; charset=utf-8" });
         return res.end("<h1>Booking not found</h1>");
@@ -693,7 +737,7 @@ const server = http.createServer(async (req, res) => {
       if (!["pending", "approved", "rejected"].includes(input.status)) {
         return sendJson(res, 400, { error: "Invalid status" });
       }
-      const booking = setBookingStatus(String(input.id || ""), input.status);
+      const booking = await setBookingStatus(String(input.id || ""), input.status);
       if (!booking) return sendJson(res, 404, { error: "Booking not found" });
       return sendJson(res, 200, { booking });
     }
@@ -704,7 +748,14 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-ensureDataFile();
-server.listen(PORT, () => {
-  console.log(`Car sharing app running at http://localhost:${PORT}`);
-});
+initStore()
+  .then(() => {
+    server.listen(PORT, () => {
+      const storage = databasePool ? "Postgres" : "local JSON";
+      console.log(`Car sharing app running at http://localhost:${PORT} using ${storage} storage`);
+    });
+  })
+  .catch((error) => {
+    console.error("Could not start storage", error);
+    process.exit(1);
+  });
