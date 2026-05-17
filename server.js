@@ -188,6 +188,44 @@ async function sendTelegramBooking(booking) {
   return { sent: results.every((result) => result.ok), approvalButtons: useApprovalButtons, results };
 }
 
+async function sendTelegramCancellation(booking) {
+  if (!TELEGRAM_BOT_TOKEN || TELEGRAM_PARENT_CHAT_IDS.length === 0) {
+    return { sent: false, reason: "Telegram is not configured" };
+  }
+
+  const start = new Date(booking.startAt).toLocaleString("da-DK", {
+    dateStyle: "medium",
+    timeStyle: "short"
+  });
+  const text = [
+    "Car booking cancelled",
+    "",
+    `Driver: ${booking.driver}`,
+    `When: ${start}`,
+    booking.destination ? `Destination: ${booking.destination}` : ""
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+  const results = [];
+
+  for (const chatId of TELEGRAM_PARENT_CHAT_IDS) {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        link_preview_options: { is_disabled: true }
+      })
+    });
+    const payload = await response.json().catch(() => ({}));
+    results.push({ chatId, ok: response.ok, payload });
+  }
+
+  return { sent: results.every((result) => result.ok), results };
+}
+
 function normalizeBooking(input) {
   const driver = String(input.driver || "").trim();
   const startAt = new Date(input.startAt);
@@ -404,6 +442,21 @@ function markBooking(id, decision) {
   return booking;
 }
 
+function cancelBooking(id) {
+  const store = readStore();
+  const booking = store.bookings.find((item) => item.id === id);
+  if (!booking) return null;
+  if (booking.status === "cancelled") return booking;
+  if (!["pending", "approved"].includes(booking.status)) {
+    throw new Error("Only pending or approved bookings can be cancelled.");
+  }
+  booking.status = "cancelled";
+  booking.cancelledAt = new Date().toISOString();
+  booking.updatedAt = booking.cancelledAt;
+  writeStore(store);
+  return booking;
+}
+
 function escapeHtml(value) {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -558,6 +611,25 @@ const server = http.createServer(async (req, res) => {
       writeStore(updatedStore);
 
       return sendJson(res, 201, { booking });
+    }
+
+    if (req.method === "POST" && url.pathname.startsWith("/api/bookings/") && url.pathname.endsWith("/cancel")) {
+      const id = decodeURIComponent(url.pathname.replace("/api/bookings/", "").replace("/cancel", ""));
+      const booking = cancelBooking(id);
+      if (!booking) return sendJson(res, 404, { error: "Booking not found" });
+
+      try {
+        booking.cancellationTelegram = await sendTelegramCancellation(booking);
+      } catch (error) {
+        booking.cancellationTelegram = { sent: false, reason: error.message };
+      }
+
+      const store = readStore();
+      const storedBooking = store.bookings.find((item) => item.id === booking.id);
+      if (storedBooking) storedBooking.cancellationTelegram = booking.cancellationTelegram;
+      writeStore(store);
+
+      return sendJson(res, 200, { booking });
     }
 
     if (req.method === "POST" && url.pathname === "/api/trips/calculate") {

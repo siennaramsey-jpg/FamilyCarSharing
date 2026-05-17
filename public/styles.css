@@ -310,6 +310,10 @@ h2 {
   background: var(--bad);
 }
 
+.mini-booking.cancelled {
+  background: var(--muted);
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -443,6 +447,11 @@ textarea {
   border-left-color: var(--bad);
 }
 
+.booking-card.cancelled {
+  border-left-color: var(--muted);
+  opacity: 0.78;
+}
+
 .booking-card strong {
   display: block;
   margin-bottom: 3px;
@@ -474,6 +483,28 @@ textarea {
 .badge.rejected {
   background: rgba(159, 48, 48, 0.14);
   color: var(--bad);
+}
+
+.badge.cancelled {
+  background: rgba(102, 115, 109, 0.14);
+  color: var(--muted);
+}
+
+.booking-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+.cancel-booking {
+  border: 1px solid rgba(159, 48, 48, 0.22);
+  border-radius: 7px;
+  padding: 8px 10px;
+  background: rgba(159, 48, 48, 0.08);
+  color: var(--bad);
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 900;
 }
 
 .cost-result {

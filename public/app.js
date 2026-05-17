@@ -126,6 +126,7 @@ function renderBookings() {
       <p>${booking.destination || "No destination added"}</p>
       ${booking.note ? `<p>${booking.note}</p>` : ""}
       <span class="badge ${booking.status}">${booking.status}</span>
+      ${["pending", "approved"].includes(booking.status) ? `<div class="booking-actions"><button class="cancel-booking" type="button" data-booking-id="${booking.id}">Cancel booking</button></div>` : ""}
     `;
     els.bookingList.appendChild(card);
   });
@@ -230,7 +231,7 @@ function saveKnownBookingStatuses(statuses) {
 }
 
 function isFinalStatus(status) {
-  return status === "approved" || status === "rejected";
+  return status === "approved" || status === "rejected" || status === "cancelled";
 }
 
 function detectBookingStatusChanges(bookings) {
@@ -241,7 +242,7 @@ function detectBookingStatusChanges(bookings) {
   bookings.forEach((booking) => {
     nextStatuses[booking.id] = booking.status;
     const previous = knownBookingStatuses[booking.id];
-    if (hasHistory && previous === "pending" && isFinalStatus(booking.status)) {
+    if (hasHistory && previous === "pending" && (booking.status === "approved" || booking.status === "rejected")) {
       changes.push(booking);
     }
   });
@@ -310,6 +311,28 @@ async function loadBookings() {
   state.bookings = bookings;
   renderCalendar();
   renderBookings();
+}
+
+async function cancelBooking(id) {
+  const booking = state.bookings.find((item) => item.id === id);
+  if (!booking) return;
+  const ok = window.confirm("Cancel this booking?");
+  if (!ok) return;
+
+  const response = await fetch(`/api/bookings/${encodeURIComponent(id)}/cancel`, {
+    method: "POST"
+  });
+  const result = await response.json();
+
+  if (!response.ok) {
+    els.bookingMessage.textContent = result.error || "Could not cancel booking.";
+    return;
+  }
+
+  els.bookingMessage.textContent = result.booking.cancellationTelegram?.sent
+    ? "Booking cancelled and your dad was notified."
+    : "Booking cancelled.";
+  await loadBookings();
 }
 
 async function createBooking(event) {
@@ -391,6 +414,10 @@ document.querySelector("#nextMonth").addEventListener("click", () => {
 
 document.querySelector("#refreshBookings").addEventListener("click", loadBookings);
 els.notificationButton.addEventListener("click", requestNotifications);
+els.bookingList.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-booking-id]");
+  if (button) cancelBooking(button.dataset.bookingId);
+});
 els.bookingForm.addEventListener("submit", createBooking);
 els.bookingForm.elements.destination.addEventListener("input", () => {
   window.clearTimeout(addressSearchTimer);
