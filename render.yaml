@@ -18,6 +18,8 @@
         generateValue: true
       - key: CALENDAR_FEED_SECRET
         generateValue: true
+      - key: CALENDAR_ATTENDEE_EMAILS
+        value: ""
       - key: DEFAULT_KM_RATE
         value: "1.5"
       - key: HOME_ADDRESS

@@ -26,6 +26,10 @@ const TELEGRAM_NOTIFY_CHAT_IDS = (process.env.TELEGRAM_NOTIFY_CHAT_IDS || "")
   .filter(Boolean);
 const APPROVAL_SECRET = process.env.APPROVAL_SECRET || "dev-secret-change-me";
 const CALENDAR_FEED_SECRET = process.env.CALENDAR_FEED_SECRET || APPROVAL_SECRET;
+const CALENDAR_ATTENDEE_EMAILS = (process.env.CALENDAR_ATTENDEE_EMAILS || "")
+  .split(",")
+  .map((email) => email.trim())
+  .filter(Boolean);
 const DEFAULT_KM_RATE = Number(process.env.DEFAULT_KM_RATE || 1.5);
 const HOME_ADDRESS = process.env.HOME_ADDRESS || "Havesvinget 14, 2950 Vedbaek";
 const COPENHAGEN_CENTER = { lat: 55.6761, lon: 12.5683 };
@@ -333,6 +337,10 @@ function escapeCalendarText(value) {
     .replace(/;/g, "\\;");
 }
 
+function escapeCalendarParam(value) {
+  return String(value || "").replace(/(["\\])/g, "\\$1");
+}
+
 function foldCalendarLine(line) {
   const chunks = [];
   let remaining = line;
@@ -387,6 +395,9 @@ function renderCalendarFeed(bookings) {
       `SUMMARY:${escapeCalendarText(`Car booking - ${booking.driver}`)}`,
       `DESCRIPTION:${escapeCalendarText(description)}`,
       booking.destination ? `LOCATION:${escapeCalendarText(booking.destination)}` : "",
+      ...CALENDAR_ATTENDEE_EMAILS.map((email) => {
+        return `ATTENDEE;CN=${escapeCalendarParam(email)};ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=FALSE:mailto:${email}`;
+      }),
       "STATUS:CONFIRMED",
       "END:VEVENT"
     );
