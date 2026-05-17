@@ -584,6 +584,15 @@ async function setBookingStatus(id, status) {
   return booking;
 }
 
+async function deleteBooking(id) {
+  const store = await readStore();
+  const before = store.bookings.length;
+  store.bookings = store.bookings.filter((item) => item.id !== id);
+  if (store.bookings.length === before) return false;
+  await writeStore(store);
+  return true;
+}
+
 function serveStatic(req, res) {
   const requestUrl = new URL(req.url, PUBLIC_BASE_URL);
   const safePath = path.normalize(decodeURIComponent(requestUrl.pathname)).replace(/^(\.\.[/\\])+/, "");
@@ -741,6 +750,16 @@ const server = http.createServer(async (req, res) => {
       const booking = await setBookingStatus(String(input.id || ""), input.status);
       if (!booking) return sendJson(res, 404, { error: "Booking not found" });
       return sendJson(res, 200, { booking });
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/admin/delete-booking") {
+      const input = await parseBody(req);
+      if (input.secret !== APPROVAL_SECRET) {
+        return sendJson(res, 403, { error: "Invalid secret" });
+      }
+      const deleted = await deleteBooking(String(input.id || ""));
+      if (!deleted) return sendJson(res, 404, { error: "Booking not found" });
+      return sendJson(res, 200, { deleted: true });
     }
 
     serveStatic(req, res);
