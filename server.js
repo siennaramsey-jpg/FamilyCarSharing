@@ -620,6 +620,7 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, {
         defaultKmRate: DEFAULT_KM_RATE,
         homeAddress: HOME_ADDRESS,
+        storage: databasePool ? "postgres" : "json",
         telegramConfigured: Boolean(TELEGRAM_BOT_TOKEN && TELEGRAM_PARENT_CHAT_IDS.length)
       });
     }
