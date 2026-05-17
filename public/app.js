@@ -1,4 +1,4 @@
-const state = {
+﻿const state = {
   cursor: new Date(),
   selected: new Date(),
   bookings: [],
@@ -7,6 +7,8 @@ const state = {
 
 const els = {
   telegramStatus: document.querySelector("#telegramStatus"),
+  notificationButton: document.querySelector("#notificationButton"),
+  alertStack: document.querySelector("#alertStack"),
   monthLabel: document.querySelector("#monthLabel"),
   calendar: document.querySelector("#calendar"),
   selectedDateText: document.querySelector("#selectedDateText"),
@@ -22,6 +24,8 @@ const els = {
 
 let addressSearchTimer;
 let selectedDestination = null;
+const STATUS_STORAGE_KEY = "familyCarSharingBookingStatuses";
+let knownBookingStatuses = readKnownBookingStatuses();
 
 const formatter = new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" });
 const monthFormatter = new Intl.DateTimeFormat("en-GB", { month: "long", year: "numeric" });
@@ -118,7 +122,7 @@ function renderBookings() {
     const start = timeFormatter.format(new Date(booking.startAt));
     const end = new Date(booking.endAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     card.innerHTML = `
-      <strong>${booking.driver} · ${start} - ${end}</strong>
+      <strong>${booking.driver} - ${start} - ${end}</strong>
       <p>${booking.destination || "No destination added"}</p>
       ${booking.note ? `<p>${booking.note}</p>` : ""}
       <span class="badge ${booking.status}">${booking.status}</span>
@@ -209,13 +213,101 @@ async function estimateDestinationTrip() {
 
   const suffix = payload.trip.method === "estimated" ? " approx." : "";
   els.tripEstimate.querySelector("strong").textContent =
-    `${payload.trip.roundTripKm.toFixed(1)} km · ${payload.trip.cost.toFixed(2)} DKK${suffix}`;
+    `${payload.trip.roundTripKm.toFixed(1)} km - ${payload.trip.cost.toFixed(2)} DKK${suffix}`;
+}
+
+function readKnownBookingStatuses() {
+  try {
+    return JSON.parse(localStorage.getItem(STATUS_STORAGE_KEY)) || {};
+  } catch (error) {
+    return {};
+  }
+}
+
+function saveKnownBookingStatuses(statuses) {
+  knownBookingStatuses = statuses;
+  localStorage.setItem(STATUS_STORAGE_KEY, JSON.stringify(statuses));
+}
+
+function isFinalStatus(status) {
+  return status === "approved" || status === "rejected";
+}
+
+function detectBookingStatusChanges(bookings) {
+  const nextStatuses = {};
+  const changes = [];
+  const hasHistory = Object.keys(knownBookingStatuses).length > 0;
+
+  bookings.forEach((booking) => {
+    nextStatuses[booking.id] = booking.status;
+    const previous = knownBookingStatuses[booking.id];
+    if (hasHistory && previous && previous !== booking.status && isFinalStatus(booking.status)) {
+      changes.push(booking);
+    }
+  });
+
+  saveKnownBookingStatuses(nextStatuses);
+  changes.forEach(showBookingAlert);
+}
+
+function updateNotificationButton() {
+  if (!("Notification" in window)) {
+    els.notificationButton.textContent = "In-app alerts on";
+    els.notificationButton.disabled = true;
+    return;
+  }
+
+  if (Notification.permission === "granted") {
+    els.notificationButton.textContent = "Alerts on";
+    els.notificationButton.disabled = true;
+  } else if (Notification.permission === "denied") {
+    els.notificationButton.textContent = "Alerts blocked";
+    els.notificationButton.disabled = true;
+  } else {
+    els.notificationButton.textContent = "Enable alerts";
+    els.notificationButton.disabled = false;
+  }
+}
+
+async function requestNotifications() {
+  if (!("Notification" in window)) return;
+  await Notification.requestPermission();
+  updateNotificationButton();
+}
+
+function showBookingAlert(booking) {
+  const isApproved = booking.status === "approved";
+  const title = isApproved ? "Booking approved" : "Booking denied";
+  const detail = `${booking.driver}: ${timeFormatter.format(new Date(booking.startAt))}`;
+
+  const alert = document.createElement("div");
+  alert.className = `app-alert ${booking.status}`;
+  alert.innerHTML = `
+    <div>
+      <strong>${title}</strong>
+      <span>${detail}</span>
+    </div>
+    <button class="alert-close" type="button" aria-label="Dismiss alert">x</button>
+  `;
+  alert.querySelector("button").addEventListener("click", () => alert.remove());
+  els.alertStack.appendChild(alert);
+  window.setTimeout(() => alert.remove(), 15000);
+
+  if ("Notification" in window && Notification.permission === "granted") {
+    new Notification(title, {
+      body: detail,
+      icon: "/icon.svg",
+      tag: booking.id
+    });
+  }
 }
 
 async function loadBookings() {
   const response = await fetch("/api/bookings");
   const payload = await response.json();
-  state.bookings = payload.bookings || [];
+  const bookings = payload.bookings || [];
+  detectBookingStatusChanges(bookings);
+  state.bookings = bookings;
   renderCalendar();
   renderBookings();
 }
@@ -298,6 +390,7 @@ document.querySelector("#nextMonth").addEventListener("click", () => {
 });
 
 document.querySelector("#refreshBookings").addEventListener("click", loadBookings);
+els.notificationButton.addEventListener("click", requestNotifications);
 els.bookingForm.addEventListener("submit", createBooking);
 els.bookingForm.elements.destination.addEventListener("input", () => {
   window.clearTimeout(addressSearchTimer);
@@ -319,7 +412,13 @@ if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/service-worker.js").catch(() => {});
 }
 
+updateNotificationButton();
 setSelectedDate(new Date());
 loadConfig().then(loadBookings).catch((error) => {
   els.bookingMessage.textContent = error.message;
+});
+
+window.setInterval(loadBookings, 15000);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) loadBookings();
 });
