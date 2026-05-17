@@ -25,6 +25,7 @@ const TELEGRAM_NOTIFY_CHAT_IDS = (process.env.TELEGRAM_NOTIFY_CHAT_IDS || "")
   .map((id) => id.trim())
   .filter(Boolean);
 const APPROVAL_SECRET = process.env.APPROVAL_SECRET || "dev-secret-change-me";
+const CALENDAR_FEED_SECRET = process.env.CALENDAR_FEED_SECRET || APPROVAL_SECRET;
 const DEFAULT_KM_RATE = Number(process.env.DEFAULT_KM_RATE || 1.5);
 const HOME_ADDRESS = process.env.HOME_ADDRESS || "Havesvinget 14, 2950 Vedbaek";
 const COPENHAGEN_CENTER = { lat: 55.6761, lon: 12.5683 };
@@ -121,6 +122,14 @@ function sendJson(res, status, payload) {
   const body = JSON.stringify(payload);
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
+    "Content-Length": Buffer.byteLength(body)
+  });
+  res.end(body);
+}
+
+function sendText(res, status, body, contentType = "text/plain; charset=utf-8") {
+  res.writeHead(status, {
+    "Content-Type": contentType,
     "Content-Length": Buffer.byteLength(body)
   });
   res.end(body);
@@ -310,6 +319,81 @@ async function sendTelegramDecision(booking) {
   }
 
   return { sent: results.every((result) => result.ok), results };
+}
+
+function calendarTimestamp(value) {
+  return new Date(value).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+}
+
+function escapeCalendarText(value) {
+  return String(value || "")
+    .replace(/\\/g, "\\\\")
+    .replace(/\n/g, "\\n")
+    .replace(/,/g, "\\,")
+    .replace(/;/g, "\\;");
+}
+
+function foldCalendarLine(line) {
+  const chunks = [];
+  let remaining = line;
+  while (Buffer.byteLength(remaining, "utf8") > 75) {
+    let size = 0;
+    let index = 0;
+    for (const char of remaining) {
+      const nextSize = size + Buffer.byteLength(char, "utf8");
+      if (nextSize > 75) break;
+      size = nextSize;
+      index += char.length;
+    }
+    chunks.push(remaining.slice(0, index));
+    remaining = ` ${remaining.slice(index)}`;
+  }
+  chunks.push(remaining);
+  return chunks.join("\r\n");
+}
+
+function renderCalendarFeed(bookings) {
+  const now = calendarTimestamp(new Date());
+  const approvedBookings = bookings
+    .filter((booking) => booking.status === "approved")
+    .sort((a, b) => new Date(a.startAt) - new Date(b.startAt));
+  const lines = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//FamilyCarSharing//Bookings//EN",
+    "CALSCALE:GREGORIAN",
+    "METHOD:PUBLISH",
+    "X-WR-CALNAME:Family car bookings",
+    "X-WR-CALDESC:Approved FamilyCarSharing bookings"
+  ];
+
+  for (const booking of approvedBookings) {
+    const description = [
+      `Driver: ${booking.driver}`,
+      booking.destination ? `Destination: ${booking.destination}` : "",
+      booking.note ? `Note: ${booking.note}` : ""
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    lines.push(
+      "BEGIN:VEVENT",
+      `UID:${escapeCalendarText(`${booking.id}@familycarsharing`)}`,
+      `DTSTAMP:${now}`,
+      `DTSTART:${calendarTimestamp(booking.startAt)}`,
+      `DTEND:${calendarTimestamp(booking.endAt)}`,
+      `CREATED:${calendarTimestamp(booking.createdAt || booking.startAt)}`,
+      `LAST-MODIFIED:${calendarTimestamp(booking.updatedAt || booking.createdAt || booking.startAt)}`,
+      `SUMMARY:${escapeCalendarText(`Car booking - ${booking.driver}`)}`,
+      `DESCRIPTION:${escapeCalendarText(description)}`,
+      booking.destination ? `LOCATION:${escapeCalendarText(booking.destination)}` : "",
+      "STATUS:CONFIRMED",
+      "END:VEVENT"
+    );
+  }
+
+  lines.push("END:VCALENDAR");
+  return `${lines.filter(Boolean).map(foldCalendarLine).join("\r\n")}\r\n`;
 }
 
 function normalizeBooking(input) {
@@ -672,8 +756,19 @@ const server = http.createServer(async (req, res) => {
         defaultKmRate: DEFAULT_KM_RATE,
         homeAddress: HOME_ADDRESS,
         storage: databasePool ? "postgres" : "json",
-        telegramConfigured: Boolean(TELEGRAM_BOT_TOKEN && TELEGRAM_PARENT_CHAT_IDS.length)
+        telegramConfigured: Boolean(TELEGRAM_BOT_TOKEN && TELEGRAM_PARENT_CHAT_IDS.length),
+        calendarFeedConfigured: Boolean(CALENDAR_FEED_SECRET)
       });
+    }
+
+    if (req.method === "GET" && url.pathname === "/calendar.ics") {
+      const secret = url.searchParams.get("secret") || "";
+      if (!CALENDAR_FEED_SECRET || secret !== CALENDAR_FEED_SECRET) {
+        return sendText(res, 403, "Invalid calendar feed link");
+      }
+
+      const store = await readStore();
+      return sendText(res, 200, renderCalendarFeed(store.bookings || []), "text/calendar; charset=utf-8");
     }
 
     if (req.method === "GET" && url.pathname === "/api/addresses") {
