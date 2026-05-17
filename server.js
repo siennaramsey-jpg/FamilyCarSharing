@@ -119,21 +119,18 @@ function formatBookingMessage(booking) {
   });
   const approveUrl = `${PUBLIC_BASE_URL}/api/approve?id=${booking.id}&decision=approved&token=${signBooking(booking.id, "approved")}`;
   const rejectUrl = `${PUBLIC_BASE_URL}/api/approve?id=${booking.id}&decision=rejected&token=${signBooking(booking.id, "rejected")}`;
+  const baseLines = [
+    "New car booking request",
+    "",
+    `Driver: ${booking.driver}`,
+    `When: ${start} - ${end}`,
+    booking.destination ? `Destination: ${booking.destination}` : "",
+    booking.note ? `Note: ${booking.note}` : ""
+  ].filter(Boolean);
 
   return {
-    text: [
-      "New car booking request",
-      "",
-      `Driver: ${booking.driver}`,
-      `When: ${start} - ${end}`,
-      booking.destination ? `Destination: ${booking.destination}` : "",
-      booking.note ? `Note: ${booking.note}` : "",
-      "",
-      `Approve: ${approveUrl}`,
-      `Reject: ${rejectUrl}`
-    ]
-      .filter(Boolean)
-      .join("\n"),
+    text: baseLines.join("\n"),
+    fallbackText: [...baseLines, "", "Reply approve or deny in Telegram."].join("\n"),
     approveUrl,
     rejectUrl
   };
@@ -163,7 +160,8 @@ async function sendTelegramBooking(booking) {
       chat_id: chatId,
       text: useApprovalButtons
         ? message.text
-        : `${message.text}\n\nApproval buttons will work after the app is deployed to a public URL. For now, please approve by replying in Telegram.`
+        : message.fallbackText,
+      link_preview_options: { is_disabled: true }
     };
 
     if (useApprovalButtons) {
@@ -406,6 +404,89 @@ function markBooking(id, decision) {
   return booking;
 }
 
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function renderApprovalPage(booking, decision, token) {
+  const label = decision === "approved" ? "Approve" : "Deny";
+  const statusText = decision === "approved" ? "approve" : "deny";
+  const when = new Date(booking.startAt).toLocaleString("da-DK", {
+    dateStyle: "medium",
+    timeStyle: "short"
+  });
+
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${label} booking</title>
+    <style>
+      body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f4f0e8; color: #18211f; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      main { width: min(440px, calc(100% - 32px)); border: 1px solid #d9d0c2; border-radius: 10px; padding: 24px; background: #fffaf1; box-shadow: 0 18px 45px rgba(33, 39, 35, 0.12); }
+      h1 { margin: 0 0 12px; }
+      p { color: #66736d; }
+      button, a { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; border-radius: 7px; padding: 0 16px; font-weight: 800; text-decoration: none; }
+      button { border: 0; background: ${decision === "approved" ? "#247a4d" : "#9f3030"}; color: white; cursor: pointer; }
+      a { color: #16423c; }
+      .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>${label} this booking?</h1>
+      <p><strong>${escapeHtml(booking.driver)}</strong> wants the car on ${escapeHtml(when)}.</p>
+      <p>${escapeHtml(booking.destination || "No destination added")}</p>
+      <form method="POST" action="/api/approve">
+        <input type="hidden" name="id" value="${escapeHtml(booking.id)}" />
+        <input type="hidden" name="decision" value="${escapeHtml(decision)}" />
+        <input type="hidden" name="token" value="${escapeHtml(token)}" />
+        <div class="actions">
+          <button type="submit">Yes, ${statusText}</button>
+          <a href="/">Cancel</a>
+        </div>
+      </form>
+    </main>
+  </body>
+</html>`;
+}
+
+function parseFormBody(raw) {
+  const params = new URLSearchParams(raw);
+  return Object.fromEntries(params.entries());
+}
+
+function parseRawBody(req) {
+  return new Promise((resolve, reject) => {
+    let raw = "";
+    req.on("data", (chunk) => {
+      raw += chunk;
+      if (raw.length > 1_000_000) {
+        reject(new Error("Request body too large"));
+        req.destroy();
+      }
+    });
+    req.on("end", () => resolve(raw));
+    req.on("error", reject);
+  });
+}
+
+function setBookingStatus(id, status) {
+  const store = readStore();
+  const booking = store.bookings.find((item) => item.id === id);
+  if (!booking) return null;
+  booking.status = status;
+  booking.updatedAt = new Date().toISOString();
+  writeStore(store);
+  return booking;
+}
+
 function serveStatic(req, res) {
   const requestUrl = new URL(req.url, PUBLIC_BASE_URL);
   const safePath = path.normalize(decodeURIComponent(requestUrl.pathname)).replace(/^(\.\.[/\\])+/, "");
@@ -499,6 +580,29 @@ const server = http.createServer(async (req, res) => {
         return res.end("<h1>Invalid approval link</h1>");
       }
 
+      const store = readStore();
+      const booking = store.bookings.find((item) => item.id === id);
+      if (!booking) {
+        res.writeHead(404, { "Content-Type": "text/html; charset=utf-8" });
+        return res.end("<h1>Booking not found</h1>");
+      }
+
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      return res.end(renderApprovalPage(booking, decision, token));
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/approve") {
+      const raw = await parseRawBody(req);
+      const input = parseFormBody(raw);
+      const id = input.id || "";
+      const decision = input.decision || "";
+      const token = input.token || "";
+
+      if (!["approved", "rejected"].includes(decision) || token !== signBooking(id, decision)) {
+        res.writeHead(403, { "Content-Type": "text/html; charset=utf-8" });
+        return res.end("<h1>Invalid approval request</h1>");
+      }
+
       const booking = markBooking(id, decision);
       if (!booking) {
         res.writeHead(404, { "Content-Type": "text/html; charset=utf-8" });
@@ -507,6 +611,19 @@ const server = http.createServer(async (req, res) => {
 
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       return res.end(`<h1>Booking ${decision}</h1><p>You can close this page.</p>`);
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/admin/booking-status") {
+      const input = await parseBody(req);
+      if (input.secret !== APPROVAL_SECRET) {
+        return sendJson(res, 403, { error: "Invalid secret" });
+      }
+      if (!["pending", "approved", "rejected"].includes(input.status)) {
+        return sendJson(res, 400, { error: "Invalid status" });
+      }
+      const booking = setBookingStatus(String(input.id || ""), input.status);
+      if (!booking) return sendJson(res, 404, { error: "Booking not found" });
+      return sendJson(res, 200, { booking });
     }
 
     serveStatic(req, res);
