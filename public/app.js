@@ -24,7 +24,7 @@ const els = {
 
 let addressSearchTimer;
 let selectedDestination = null;
-const STATUS_STORAGE_KEY = "familyCarSharingBookingStatuses";
+const STATUS_STORAGE_KEY = "familyCarSharingBookingStatusesV2";
 let knownBookingStatuses = readKnownBookingStatuses();
 
 const formatter = new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" });
@@ -241,7 +241,7 @@ function detectBookingStatusChanges(bookings) {
   bookings.forEach((booking) => {
     nextStatuses[booking.id] = booking.status;
     const previous = knownBookingStatuses[booking.id];
-    if (hasHistory && previous && previous !== booking.status && isFinalStatus(booking.status)) {
+    if (hasHistory && previous === "pending" && isFinalStatus(booking.status)) {
       changes.push(booking);
     }
   });
