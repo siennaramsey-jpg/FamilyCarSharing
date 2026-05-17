@@ -12,6 +12,8 @@
         sync: false
       - key: TELEGRAM_PARENT_CHAT_IDS
         sync: false
+      - key: TELEGRAM_NOTIFY_CHAT_IDS
+        sync: false
       - key: APPROVAL_SECRET
         generateValue: true
       - key: DEFAULT_KM_RATE

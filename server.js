@@ -20,6 +20,10 @@ const TELEGRAM_PARENT_CHAT_IDS = (process.env.TELEGRAM_PARENT_CHAT_IDS || "")
   .split(",")
   .map((id) => id.trim())
   .filter(Boolean);
+const TELEGRAM_NOTIFY_CHAT_IDS = (process.env.TELEGRAM_NOTIFY_CHAT_IDS || "")
+  .split(",")
+  .map((id) => id.trim())
+  .filter(Boolean);
 const APPROVAL_SECRET = process.env.APPROVAL_SECRET || "dev-secret-change-me";
 const DEFAULT_KM_RATE = Number(process.env.DEFAULT_KM_RATE || 1.5);
 const HOME_ADDRESS = process.env.HOME_ADDRESS || "Havesvinget 14, 2950 Vedbaek";
@@ -254,6 +258,44 @@ async function sendTelegramCancellation(booking) {
   const results = [];
 
   for (const chatId of TELEGRAM_PARENT_CHAT_IDS) {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        link_preview_options: { is_disabled: true }
+      })
+    });
+    const payload = await response.json().catch(() => ({}));
+    results.push({ chatId, ok: response.ok, payload });
+  }
+
+  return { sent: results.every((result) => result.ok), results };
+}
+
+async function sendTelegramDecision(booking) {
+  if (!TELEGRAM_BOT_TOKEN || TELEGRAM_NOTIFY_CHAT_IDS.length === 0) {
+    return { sent: false, reason: "Decision notifications are not configured" };
+  }
+
+  const start = new Date(booking.startAt).toLocaleString("da-DK", {
+    dateStyle: "medium",
+    timeStyle: "short"
+  });
+  const decision = booking.status === "approved" ? "approved" : "denied";
+  const text = [
+    `Your car booking was ${decision}`,
+    "",
+    `When: ${start}`,
+    booking.destination ? `Destination: ${booking.destination}` : ""
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+  const results = [];
+
+  for (const chatId of TELEGRAM_NOTIFY_CHAT_IDS) {
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -733,6 +775,16 @@ const server = http.createServer(async (req, res) => {
       if (!booking) {
         res.writeHead(404, { "Content-Type": "text/html; charset=utf-8" });
         return res.end("<h1>Booking not found</h1>");
+      }
+
+      try {
+        booking.decisionTelegram = await sendTelegramDecision(booking);
+        const store = await readStore();
+        const storedBooking = store.bookings.find((item) => item.id === booking.id);
+        if (storedBooking) storedBooking.decisionTelegram = booking.decisionTelegram;
+        await writeStore(store);
+      } catch (error) {
+        booking.decisionTelegram = { sent: false, reason: error.message };
       }
 
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
